@@ -82,7 +82,7 @@ function parseRows(data){
   if(!name&&!ticker&&!isin&&!wkn)return null;
   if(!qty)return null;
   const cleanName=String(name||ticker||isin||wkn).trim();
-  const mapped=SYMBOLS[cleanName.toUpperCase()]||'';
+  const symbolKey=cleanName.toUpperCase().replace(/\\s+/g,' ').trim();\n  const mapped=Object.entries(SYMBOLS).find(([k])=>k.toUpperCase().replace(/\\s+/g,' ').trim()===symbolKey)?.[1]||'';
   return {name:cleanName,ticker:String(ticker||mapped),isin:String(isin||''),wkn:String(wkn||''),qty,buy,current:current||buy,action,hasAction:!!action};
  }).filter(Boolean);
  if(!records.length)return [];
