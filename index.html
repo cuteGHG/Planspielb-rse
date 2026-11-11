@@ -34,13 +34,14 @@ const num=v=>{if(typeof v==='number')return v;let s=String(v??'').trim().replace
 const norm=s=>String(s??'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]/g,'');
 function find(row,keys){const entries=Object.entries(row);for(const k of keys){const hit=entries.find(([h])=>norm(h)===norm(k));if(hit&&hit[1]!==''&&hit[1]!=null)return hit[1]}for(const k of keys){const hit=entries.find(([h])=>norm(h).includes(norm(k)));if(hit&&hit[1]!==''&&hit[1]!=null)return hit[1]}return ''}
 const COLS={
- name:['Aktie','Wertpapier','Wertpapiername','Name','Bezeichnung','Unternehmen','Security','Instrument','Produkt','Titel'],
+ name:['Aktie','Wertpapier','Wertpapiername','Name','Bezeichnung','Unternehmen','Security','Instrument Name','Instrument','Produkt','Titel'],
  ticker:['Ticker','Symbol','Yahoo Symbol','Börsenkürzel','Kürzel','Trading Symbol'],
  isin:['ISIN','Isin Nummer','Wertpapier ISIN'],wkn:['WKN','Wertpapierkennnummer'],
  qty:['Stück','Stueck','Anzahl','Menge','Quantity','Shares','Bestand','Stückzahl','Ausgeführt','Ausgeführte Stück','Nominal'],
- buy:['Kaufkurs','Einstandskurs','Durchschnittlicher Kaufpreis','Kaufpreis','Preis','Kurs beim Kauf','Buy Price','Ausführungskurs','Limit','Orderkurs'],
+ buy:['Kaufkurs','Einstandskurs','Durchschnittlicher Kaufpreis','Kaufpreis','Preis','Kurs beim Kauf','Buy Price','Kurs der Ausführung','Ausführungskurs','Limit','Orderkurs'],
  current:['Aktueller Kurs','Kurs aktuell','Current Price','Last Price','Letzter Kurs','Börsenkurs','Marktkurs'],
- action:['Art','Typ','Transaktion','Geschäft','Richtung','Ordertyp','Kauf/Verkauf','Aktion','Seite'],
+ action:['Art','Typ','Transaktion','Geschäft','Richtung','Ordertyp','Order Art Kauf/Verkauf','Kauf/Verkauf','Aktion','Seite'],
+ status:['Status'],
  date:['Datum','Zeitpunkt','Handelsdatum','Ausführungsdatum']
 };
 function rowsFromSheet(sheet){
@@ -55,15 +56,34 @@ function rowsFromSheet(sheet){
  const headers=matrix[headerAt].map((v,i)=>String(v||'Spalte '+(i+1)).trim());
  return matrix.slice(headerAt+1).filter(row=>row.some(v=>String(v??'').trim()!=='')).map(row=>Object.fromEntries(headers.map((h,i)=>[h,row[i]??''])));
 }
+const SYMBOLS={
+ 'NVIDIA':'NVDA','AMD':'AMD','SIEMENS ENERGY AG NA O.N.':'ENR.DE','SIEMENS':'SIE.DE','SAP':'SAP.DE',
+ 'MICROSOFT':'MSFT','MICRON TECHN. INC. DL-,10':'MU','APPLE':'AAPL','ASML HOLDING EO -,09':'ASML.AS',
+ 'FMC':'FMC','WAL MART':'WMT','META PLATF. A DL-,000006':'META','TAKE-TWO INTERACT. SOFTW.':'TTWO',
+ 'STMICROELECTRONICS':'STM','PEARSON PLC LS-,25':'PSON.L','WOLTERS KLUWER NAM. EO-12':'WKL.AS',
+ 'DT. BÖRSE':'DB1.DE','MARVELL TECH. GRP DL-,002':'MRVL','COLOPLAST NAM. B DK 1':'COLO-B.CO',
+ 'TESLA INC. DL -,001':'TSLA','ALPHABET INC.CL.A DL-,001':'GOOGL','VESTAS WIND SYS. DK -,20':'VWS.CO',
+ 'DASSAULT SYS SE INH.EO0,1':'DSY.PA','RHEINMETALL':'RHM.DE','ROPER TECHNOLOGIES DL-,01':'ROP',
+ 'SIEMENS HEALTH.AG NA O.N.':'SHL.DE','NETFLIX INC. DL-,001':'NFLX','INTEL':'INTC','IBM':'IBM',
+ 'COCA-COLA EU.PA. EO -,01':'CCEP','LUMENTUM HLDGS IN.DL-,001':'LITE','ADDTECH AB B SK 0,1875':'ADDT-B.ST',
+ 'DT. BANK':'DBK.DE','NIKE':'NKE','INFINEON':'IFX.DE','LAM RESEARCH CORP. NEW':'LRCX',
+ 'CONSTELLATION ENERGY':'CEG','PALO ALTO NETWKS DL-,0001':'PANW','NEMETSCHEK SE O.N.':'NEM.DE',
+ 'APPLIED MATLS':'AMAT','BROADCOM INC. DL-,001':'AVGO','DR.ING.H.C.F.PORSCHE VZO':'P911.DE',
+ 'ASTERA LABS INC. O.N.':'ALAB','ARM HLDGS ADR DL-,001':'ARM'
+};
 function parseRows(data){
  const records=data.map(r=>{
   const name=find(r,COLS.name),ticker=find(r,COLS.ticker),isin=find(r,COLS.isin),wkn=find(r,COLS.wkn);
+  const status=String(find(r,COLS.status)||'').toLowerCase();
+  if(status && !/ausgefuehrt|ausgeführt|executed|filled/.test(status))return null;
   const rawQty=find(r,COLS.qty),qty=Math.abs(num(rawQty));
   const buy=num(find(r,COLS.buy)),current=num(find(r,COLS.current));
   const action=String(find(r,COLS.action)||'').toLowerCase();
   if(!name&&!ticker&&!isin&&!wkn)return null;
   if(!qty)return null;
-  return {name:String(name||ticker||isin||wkn),ticker:String(ticker||''),isin:String(isin||''),wkn:String(wkn||''),qty,buy,current:current||buy,action,hasAction:!!action};
+  const cleanName=String(name||ticker||isin||wkn).trim();
+  const mapped=SYMBOLS[cleanName.toUpperCase()]||'';
+  return {name:cleanName,ticker:String(ticker||mapped),isin:String(isin||''),wkn:String(wkn||''),qty,buy,current:current||buy,action,hasAction:!!action};
  }).filter(Boolean);
  if(!records.length)return [];
  const transactional=records.some(r=>/kauf|verkauf|buy|sell|purchase|sale/.test(r.action));
