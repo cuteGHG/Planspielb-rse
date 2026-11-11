@@ -22,7 +22,7 @@ h2{font-size:23px;margin:0 0 6px}.sub{color:var(--muted);margin-bottom:24px}.gri
 <div class="card"><div class="metric-label">Investiertes Kapital</div><div class="metric" id="invested">–</div><div class="delta">Einstandswert aller Positionen</div></div>
 <div class="card"><div class="metric-label">Positionen</div><div class="metric" id="count">0</div><div class="delta">Verschiedene Wertpapiere</div></div>
 </section>
-<section class="section layout"><div class="card"><div class="sectionhead"><h3>Depotentwicklung</h3><span class="tag">Portfolio</span></div><div class="chartbox"><canvas id="chart"></canvas></div></div><div class="card"><div class="sectionhead"><h3>Handelsbuch importieren</h3><span class="tag">CSV · XLSX · XLS</span></div><div class="upload"><strong>📂 Datei hier auswählen</strong><p>Unterstützt Excel- und CSV-Exporte deines Handelsbuchs.</p><label class="btn" for="file">Datei auswählen</label><input id="file" type="file" accept=".csv,.xlsx,.xls"></div><div class="hint">Erkannt werden Spalten wie Name, Aktie, Symbol, ISIN, WKN, Stück, Anzahl, Kaufkurs und Kurs. Deine Datei wird lokal im Browser verarbeitet und nicht hochgeladen.</div><div class="sectionhead" style="margin-top:18px"><h3>Kursdaten</h3><button class="btn secondary" id="refresh">Kurse aktualisieren</button></div><div class="status" id="quoteStatus">Automatischer Abruf alle 60 Sekunden. Dafür muss ein Kursanbieter unter DEPOT_QUOTES_URL verbunden sein.</div></div></section>
+<section class="section layout"><div class="card"><div class="sectionhead"><h3>Depotentwicklung</h3><span class="tag">Portfolio</span></div><div class="chartbox"><canvas id="chart"></canvas></div></div><div class="card"><div class="sectionhead"><h3>Handelsbuch importieren</h3><span class="tag">CSV · XLSX · XLS</span></div><div class="upload"><strong>📂 Datei hier auswählen</strong><p>Unterstützt Excel- und CSV-Exporte deines Handelsbuchs.</p><label class="btn" for="file">Datei auswählen</label><input id="file" type="file" accept=".csv,.xlsx,.xls"></div><div class="hint">Die Website durchsucht alle Tabellenblätter und erkennt gängige deutsche und englische Spaltennamen für Wertpapier, ISIN, WKN, Symbol, Stückzahl, Kauf/Verkauf und Kurs. Deine Datei wird lokal im Browser verarbeitet und nicht hochgeladen.</div><div class="sectionhead" style="margin-top:18px"><h3>Kursdaten</h3><button class="btn secondary" id="refresh">Kurse aktualisieren</button></div><div class="status" id="quoteStatus">Automatischer Abruf alle 60 Sekunden. Dafür muss ein Kursanbieter unter DEPOT_QUOTES_URL verbunden sein.</div></div></section>
 <section class="section card"><div class="sectionhead"><h3>Deine Wertpapiere</h3><span class="tag" id="holdingsCount">0 Positionen</span></div><div class="tablewrap"><table><thead><tr><th>WERTPAPIER</th><th class="right">STÜCK</th><th class="right">KAUFKURS</th><th class="right">AKTUELLER KURS</th><th class="right">MARKTWERT</th><th class="right">GEWINN / VERLUST</th></tr></thead><tbody id="rows"><tr><td colspan="6" class="empty">Lade dein Handelsbuch hoch, um deine Aktien hier zu sehen.</td></tr></tbody></table></div></section>
 <div class="footer">Planspielbörse · Nur zu Informations- und Lernzwecken. Keine Anlageberatung. Kurse können verzögert sein und von deinem Planspiel-Anbieter abweichen.</div>
 </main>
@@ -31,12 +31,58 @@ let holdings=[];let chart;let quoteTimer=null;let secondsToRefresh=60;
 const fmt=n=>Number.isFinite(n)?new Intl.NumberFormat('de-DE',{style:'currency',currency:'EUR'}).format(n):'–';
 const num=v=>{if(typeof v==='number')return v;let s=String(v??'').trim().replace(/[€$%\s]/g,'');if(!s)return 0;if(s.includes(',')&&s.includes('.'))s=s.replace(/\./g,'').replace(',','.');else s=s.replace(',','.');return Number(s)||0};
 const norm=s=>String(s??'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]/g,'');
-function find(row,keys){const entries=Object.entries(row);for(const k of keys){const hit=entries.find(([h])=>norm(h)===norm(k));if(hit)return hit[1]}for(const k of keys){const hit=entries.find(([h])=>norm(h).includes(norm(k)));if(hit)return hit[1]}return ''}
-function parseRows(data){return data.map(r=>{const name=find(r,['Aktie','Wertpapier','Name','Bezeichnung','Unternehmen','Security']);const ticker=find(r,['Ticker','Symbol','Yahoo Symbol']);const isin=find(r,['ISIN']);const wkn=find(r,['WKN']);const qty=num(find(r,['Stück','Stueck','Anzahl','Menge','Quantity','Shares','Bestand']));const buy=num(find(r,['Kaufkurs','Einstandskurs','Durchschnittlicher Kaufpreis','Preis','Kurs beim Kauf','Buy Price']));const current=num(find(r,['Aktueller Kurs','Kurs aktuell','Current Price','Last Price']));if(!name&&!ticker&&!isin&&!wkn)return null;if(qty<=0)return null;return {name:String(name||ticker||isin||wkn),ticker:String(ticker||''),isin:String(isin||''),wkn:String(wkn||''),qty,buy,current:current||buy};}).filter(Boolean)}
+function find(row,keys){const entries=Object.entries(row);for(const k of keys){const hit=entries.find(([h])=>norm(h)===norm(k));if(hit&&hit[1]!==''&&hit[1]!=null)return hit[1]}for(const k of keys){const hit=entries.find(([h])=>norm(h).includes(norm(k)));if(hit&&hit[1]!==''&&hit[1]!=null)return hit[1]}return ''}
+const COLS={
+ name:['Aktie','Wertpapier','Wertpapiername','Name','Bezeichnung','Unternehmen','Security','Instrument','Produkt','Titel'],
+ ticker:['Ticker','Symbol','Yahoo Symbol','Börsenkürzel','Kürzel','Trading Symbol'],
+ isin:['ISIN','Isin Nummer','Wertpapier ISIN'],wkn:['WKN','Wertpapierkennnummer'],
+ qty:['Stück','Stueck','Anzahl','Menge','Quantity','Shares','Bestand','Stückzahl','Ausgeführt','Ausgeführte Stück','Nominal'],
+ buy:['Kaufkurs','Einstandskurs','Durchschnittlicher Kaufpreis','Kaufpreis','Preis','Kurs beim Kauf','Buy Price','Ausführungskurs','Limit','Orderkurs'],
+ current:['Aktueller Kurs','Kurs aktuell','Current Price','Last Price','Letzter Kurs','Börsenkurs','Marktkurs'],
+ action:['Art','Typ','Transaktion','Geschäft','Richtung','Ordertyp','Kauf/Verkauf','Aktion','Seite'],
+ date:['Datum','Zeitpunkt','Handelsdatum','Ausführungsdatum']
+};
+function rowsFromSheet(sheet){
+ const matrix=XLSX.utils.sheet_to_json(sheet,{header:1,defval:'',raw:false});
+ let best=-1,headerAt=0;
+ for(let i=0;i<Math.min(matrix.length,20);i++){
+  const cells=matrix[i].map(norm);let score=0;
+  for(const group of Object.values(COLS))if(group.some(k=>cells.some(v=>v===norm(k)||v.includes(norm(k)))))score++;
+  if(score>best){best=score;headerAt=i}
+ }
+ if(best<2)return [];
+ const headers=matrix[headerAt].map((v,i)=>String(v||'Spalte '+(i+1)).trim());
+ return matrix.slice(headerAt+1).filter(row=>row.some(v=>String(v??'').trim()!=='')).map(row=>Object.fromEntries(headers.map((h,i)=>[h,row[i]??''])));
+}
+function parseRows(data){
+ const records=data.map(r=>{
+  const name=find(r,COLS.name),ticker=find(r,COLS.ticker),isin=find(r,COLS.isin),wkn=find(r,COLS.wkn);
+  const rawQty=find(r,COLS.qty),qty=Math.abs(num(rawQty));
+  const buy=num(find(r,COLS.buy)),current=num(find(r,COLS.current));
+  const action=String(find(r,COLS.action)||'').toLowerCase();
+  if(!name&&!ticker&&!isin&&!wkn)return null;
+  if(!qty)return null;
+  return {name:String(name||ticker||isin||wkn),ticker:String(ticker||''),isin:String(isin||''),wkn:String(wkn||''),qty,buy,current:current||buy,action,hasAction:!!action};
+ }).filter(Boolean);
+ if(!records.length)return [];
+ const transactional=records.some(r=>/kauf|verkauf|buy|sell|purchase|sale/.test(r.action));
+ if(!transactional)return records;
+ const map=new Map();
+ for(const r of records){
+  const key=(r.isin||r.wkn||r.ticker||r.name).toUpperCase();
+  const old=map.get(key)||{...r,qty:0,buy:0,current:r.current||r.buy,cost:0};
+  const sell=/verkauf|sell|sale/.test(r.action),buyAction=/kauf|buy|purchase/.test(r.action);
+  if(sell){old.qty=Math.max(0,old.qty-r.qty);old.cost=Math.max(0,old.cost-r.qty*old.buy)}
+  else if(buyAction){const nextQty=old.qty+r.qty;old.buy=nextQty?(old.qty*old.buy+r.qty*r.buy)/nextQty:r.buy;old.qty=nextQty;old.cost=old.qty*old.buy}
+  if(r.current)old.current=r.current;
+  map.set(key,old);
+ }
+ return [...map.values()].filter(r=>r.qty>0);
+}
 function render(){const total=holdings.reduce((s,h)=>s+h.qty*h.current,0),invest=holdings.reduce((s,h)=>s+h.qty*h.buy,0),gain=total-invest;document.getElementById('total').textContent=fmt(total);document.getElementById('invested').textContent=fmt(invest);document.getElementById('profit').textContent=fmt(gain);document.getElementById('profit').className='metric '+(gain<0?'negative':'');document.getElementById('profitPct').textContent=(invest?((gain/invest)*100).toFixed(2).replace('.',',')+' %':'–')+' seit Kauf';document.getElementById('profitPct').className='delta '+(gain<0?'negative':'');document.getElementById('totalDelta').textContent=holdings.length?'Auf Basis der zuletzt verfügbaren Kurse':'Importiere dein Handelsbuch';document.getElementById('count').textContent=holdings.length;document.getElementById('holdingsCount').textContent=holdings.length+' Positionen';document.getElementById('rows').innerHTML=holdings.length?holdings.map(h=>{const value=h.qty*h.current,g=h.qty*(h.current-h.buy);return '<tr><td><div class="stock"><div class="ticker">'+esc((h.ticker||h.name).slice(0,5))+'</div><div><b>'+esc(h.name)+'</b><small>'+esc(h.ticker||h.isin||h.wkn||'Symbol nicht erkannt')+'</small></div></div></td><td class="right">'+h.qty.toLocaleString('de-DE')+'</td><td class="right">'+fmt(h.buy)+'</td><td class="right">'+fmt(h.current)+'</td><td class="right"><b>'+fmt(value)+'</b></td><td class="right '+(g<0?'negative':'')+'">'+fmt(g)+'</td></tr>'}).join(''):'<tr><td colspan="6" class="empty">Keine Positionen erkannt. Prüfe die Spalten deiner Datei.</td></tr>';drawChart(total,invest)}
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function drawChart(total,invest){const ctx=document.getElementById('chart');if(chart)chart.destroy();chart=new Chart(ctx,{type:'line',data:{labels:['Einstand','Aktuell'],datasets:[{data:[invest,total],borderColor:'#27d69a',backgroundColor:'rgba(39,214,154,.12)',fill:true,tension:.35,pointRadius:4,pointBackgroundColor:'#27d69a'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{grid:{color:'#202d3a'},ticks:{color:'#8c9bad'}},y:{grid:{color:'#202d3a'},ticks:{color:'#8c9bad',callback:v=>new Intl.NumberFormat('de-DE',{notation:'compact',style:'currency',currency:'EUR'}).format(v)}}}}})}
-document.getElementById('file').addEventListener('change',async e=>{const file=e.target.files[0];if(!file)return;try{const buf=await file.arrayBuffer();let rows;if(file.name.toLowerCase().endsWith('.csv')){const text=new TextDecoder().decode(buf);const wb=XLSX.read(text,{type:'string'});rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:''})}else{const wb=XLSX.read(buf,{type:'array'});rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:''})}holdings=parseRows(rows);render();startQuoteRefresh();document.getElementById('quoteStatus').textContent=holdings.length+' Positionen erkannt. Für echte Live-Kurse muss ein Kursdatenanbieter angebunden werden; Importwerte werden bis dahin angezeigt.';document.getElementById('updated').textContent='Import: '+new Date().toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'});}catch(err){alert('Datei konnte nicht gelesen werden. Bitte prüfe das Format.')}});async function refreshQuotes(){
+document.getElementById('file').addEventListener('change',async e=>{const file=e.target.files[0];if(!file)return;try{const buf=await file.arrayBuffer();const wb=file.name.toLowerCase().endsWith('.csv')?XLSX.read(new TextDecoder().decode(buf),{type:'string',cellDates:true}):XLSX.read(buf,{type:'array',cellDates:true});let rows=[];for(const sheetName of wb.SheetNames){rows=rows.concat(rowsFromSheet(wb.Sheets[sheetName]))}holdings=parseRows(rows);render();startQuoteRefresh();document.getElementById('quoteStatus').textContent=holdings.length+' Wertpapierpositionen aus '+wb.SheetNames.length+' Tabellenblatt/Tabellenblättern erkannt. '+(holdings.filter(h=>h.isin||h.wkn).length)+' davon mit ISIN/WKN. Bitte Ergebnis prüfen; ungewöhnliche Exportformate können eine Spaltenzuordnung erfordern.';document.getElementById('updated').textContent='Import: '+new Date().toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'});}catch(err){alert('Datei konnte nicht gelesen werden. Bitte prüfe das Format.')}});async function refreshQuotes(){
   const endpoint=window.DEPOT_QUOTES_URL;
   if(!holdings.length){document.getElementById('quoteStatus').textContent='Bitte zuerst dein Handelsbuch importieren. Danach wird alle 60 Sekunden nach neuen Kursen gefragt.';return}
   if(!endpoint){document.getElementById('quoteStatus').textContent='Minuten-Aktualisierung aktiv, aber noch kein Kursanbieter verbunden. Angezeigt werden weiterhin die Kurse aus deinem Import. Für echte Live-Kurse DEPOT_QUOTES_URL mit einem Kursdaten-Backend verbinden.';document.getElementById('updated').textContent='Keine Live-Kursquelle';return}
