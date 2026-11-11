@@ -84,25 +84,49 @@ function render(){const total=holdings.reduce((s,h)=>s+h.qty*h.current,0),invest
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function drawChart(total,invest){const ctx=document.getElementById('chart');if(chart)chart.destroy();chart=new Chart(ctx,{type:'line',data:{labels:['Einstand','Aktuell'],datasets:[{data:[invest,total],borderColor:'#27d69a',backgroundColor:'rgba(39,214,154,.12)',fill:true,tension:.35,pointRadius:4,pointBackgroundColor:'#27d69a'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{grid:{color:'#202d3a'},ticks:{color:'#8c9bad'}},y:{grid:{color:'#202d3a'},ticks:{color:'#8c9bad',callback:v=>new Intl.NumberFormat('de-DE',{notation:'compact',style:'currency',currency:'EUR'}).format(v)}}}}})}
 document.getElementById('file').addEventListener('change',async e=>{const file=e.target.files[0];if(!file)return;try{const buf=await file.arrayBuffer();const wb=file.name.toLowerCase().endsWith('.csv')?XLSX.read(new TextDecoder().decode(buf),{type:'string',cellDates:true}):XLSX.read(buf,{type:'array',cellDates:true});let rows=[];for(const sheetName of wb.SheetNames){rows=rows.concat(rowsFromSheet(wb.Sheets[sheetName]))}holdings=parseRows(rows);render();startQuoteRefresh();document.getElementById('quoteStatus').textContent=holdings.length+' Wertpapierpositionen aus '+wb.SheetNames.length+' Tabellenblatt/Tabellenblättern erkannt. '+(holdings.filter(h=>h.isin||h.wkn).length)+' davon mit ISIN/WKN. Bitte Ergebnis prüfen; ungewöhnliche Exportformate können eine Spaltenzuordnung erfordern.';document.getElementById('updated').textContent='Import: '+new Date().toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'});}catch(err){alert('Datei konnte nicht gelesen werden. Bitte prüfe das Format.')}});async function refreshQuotes(){
-  const endpoint=window.DEPOT_QUOTES_URL;
-  if(!holdings.length){document.getElementById('quoteStatus').textContent='Bitte zuerst dein Handelsbuch importieren. Danach wird alle 60 Sekunden nach neuen Kursen gefragt.';return}
-  if(!endpoint){document.getElementById('quoteStatus').textContent='Minuten-Aktualisierung aktiv, aber noch kein Kursanbieter verbunden. Angezeigt werden weiterhin die Kurse aus deinem Import. Für echte Live-Kurse DEPOT_QUOTES_URL mit einem Kursdaten-Backend verbinden.';document.getElementById('updated').textContent='Keine Live-Kursquelle';return}
-  try{
-    const symbols=[...new Set(holdings.map(h=>h.ticker||h.isin||h.wkn).filter(Boolean))];
-    const url=new URL(endpoint,window.location.href);url.searchParams.set('symbols',symbols.join(','));
-    const apiKey=localStorage.getItem('planspiel_api_key')||'';
-    const response=await fetch(url.toString(),{cache:'no-store',headers:apiKey?{'Authorization':'Bearer '+apiKey}:{}});
-    if(!response.ok)throw new Error('HTTP '+response.status);
-    const quotes=await response.json();
-    let changed=0;
-    holdings=holdings.map(h=>{const key=h.ticker||h.isin||h.wkn;const quote=Number(quotes[key]?.price??quotes[key]);if(Number.isFinite(quote)&&quote>0){changed++;return {...h,current:quote}}return h});
-    render();
-    const now=new Date().toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
-    document.getElementById('quoteStatus').textContent=changed+' von '+holdings.length+' Positionen aktualisiert. Nächster Abruf in 60 Sekunden.';
-    document.getElementById('updated').textContent='Kursstand '+now;
-  }catch(error){
-    document.getElementById('quoteStatus').textContent='Kursabruf fehlgeschlagen. Der letzte bekannte Kurs bleibt stehen; neuer Versuch in 60 Sekunden.';
-    document.getElementById('updated').textContent='Abruf fehlgeschlagen';
+  if(!holdings.length){
+    document.getElementById('quoteStatus').textContent='Bitte zuerst dein Handelsbuch importieren.';
+    return;
+  }
+  const apiKey=localStorage.getItem('planspiel_api_key')||'';
+  if(!apiKey){
+    document.getElementById('quoteStatus').textContent='Bitte zuerst deinen Finnhub-API-Key oben eingeben und speichern.';
+    document.getElementById('updated').textContent='API-Key fehlt';
+    return;
+  }
+  const withTicker=holdings.filter(h=>h.ticker);
+  if(!withTicker.length){
+    document.getElementById('quoteStatus').textContent='Keine Börsenkürzel/Ticker erkannt. Finnhub benötigt z. B. AAPL oder SAP.DE; ISIN/WKN allein werden hier noch nicht automatisch umgewandelt.';
+    document.getElementById('updated').textContent='Ticker fehlen';
+    return;
+  }
+  document.getElementById('quoteStatus').textContent='Frage '+withTicker.length+' Kurse bei Finnhub ab …';
+  let changed=0, failed=[];
+  const results=await Promise.all(withTicker.map(async h=>{
+    try{
+      const url=new URL('https://finnhub.io/api/v1/quote');
+      url.searchParams.set('symbol',h.ticker.trim().toUpperCase());
+      url.searchParams.set('token',apiKey);
+      const response=await fetch(url.toString(),{cache:'no-store'});
+      if(!response.ok)throw new Error('HTTP '+response.status);
+      const quote=await response.json();
+      if(Number(quote.c)>0)return {key:h.ticker.toUpperCase(),price:Number(quote.c)};
+      throw new Error(quote.error||'Kein Kurs für dieses Symbol');
+    }catch(e){failed.push(h.ticker+': '+e.message);return null}
+  }));
+  const prices=new Map(results.filter(Boolean).map(q=>[q.key,q.price]));
+  holdings=holdings.map(h=>{
+    const price=prices.get((h.ticker||'').trim().toUpperCase());
+    if(price){changed++;return {...h,current:price}}
+    return h;
+  });
+  render();
+  const now=new Date().toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  document.getElementById('updated').textContent=changed?'Kursstand '+now:'Keine Kurse erhalten';
+  if(changed){
+    document.getElementById('quoteStatus').textContent=changed+' von '+withTicker.length+' Ticker-Kursen aktualisiert.'+(failed.length?' Nicht gefunden: '+failed.slice(0,4).join('; '):'')+' Automatische Aktualisierung alle 60 Sekunden.';
+  }else{
+    document.getElementById('quoteStatus').textContent='Finnhub hat keine Kurse geliefert. Prüfe API-Key und Ticker-Schreibweise. '+(failed[0]||'')+' Hinweis: deutsche Aktien benötigen häufig ein Börsensuffix, z. B. .DE.';
   }
 }
 function startQuoteRefresh(){
