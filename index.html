@@ -22,7 +22,8 @@ h2{font-size:23px;margin:0 0 6px}.sub{color:var(--muted);margin-bottom:24px}.gri
 <div class="card"><div class="metric-label">Investiertes Kapital</div><div class="metric" id="invested">–</div><div class="delta">Einstandswert aller Positionen</div></div>
 <div class="card"><div class="metric-label">Positionen</div><div class="metric" id="count">0</div><div class="delta">Verschiedene Wertpapiere</div></div>
 </section>
-<section class="section layout"><div class="card"><div class="sectionhead"><h3>Depotentwicklung</h3><span class="tag">Portfolio</span></div><div class="chartbox"><canvas id="chart"></canvas></div></div><div class="card"><div class="sectionhead"><h3>Handelsbuch importieren</h3><span class="tag">CSV · XLSX · XLS</span></div><div class="upload"><strong>📂 Datei hier auswählen</strong><p>Unterstützt Excel- und CSV-Exporte deines Handelsbuchs.</p><label class="btn" for="file">Datei auswählen</label><input id="file" type="file" accept=".csv,.xlsx,.xls"></div><div class="hint">Die Website durchsucht alle Tabellenblätter und erkennt gängige deutsche und englische Spaltennamen für Wertpapier, ISIN, WKN, Symbol, Stückzahl, Kauf/Verkauf und Kurs. Deine Datei wird lokal im Browser verarbeitet und nicht hochgeladen.</div><div class="sectionhead" style="margin-top:18px"><h3>Kursdaten</h3><button class="btn secondary" id="refresh">Kurse aktualisieren</button></div><div class="status" id="quoteStatus">Automatischer Abruf alle 60 Sekunden. Dafür muss ein Kursanbieter unter DEPOT_QUOTES_URL verbunden sein.</div></div></section>
+<section class="section layout"><div class="card"><div class="sectionhead"><h3>Depotentwicklung</h3><span class="tag">Portfolio</span></div><div class="chartbox"><canvas id="chart"></canvas></div></div><div class="card"><div class="sectionhead"><h3>Handelsbuch importieren</h3><span class="tag">CSV · XLSX · XLS</span></div><div class="upload"><strong>📂 Datei hier auswählen</strong><p>Unterstützt Excel- und CSV-Exporte deines Handelsbuchs.</p><label class="btn" for="file">Datei auswählen</label><input id="file" type="file" accept=".csv,.xlsx,.xls"></div><div class="hint">Die Website durchsucht alle Tabellenblätter und erkennt gängige deutsche und englische Spaltennamen für Wertpapier, ISIN, WKN, Symbol, Stückzahl, Kauf/Verkauf und Kurs. Deine Datei wird lokal im Browser verarbeitet und nicht hochgeladen.</div><div class="sectionhead" style="margin-top:18px"><h3>Kursdaten</h3><button class="btn secondary" id="refresh">Kurse aktualisieren</button></div><div class="status" id="quoteStatus">Automatischer Abruf alle 60 Sekunden. Dafür muss ein Kursanbieter verbunden sein.</div>
+<div style="margin-top:14px"><label for="apiKey" style="display:block;color:var(--muted);font-size:12px;margin-bottom:7px">API-Key deines Kursanbieters</label><div style="display:flex;gap:8px"><input id="apiKey" type="password" autocomplete="off" placeholder="API-Key hier einfügen" style="min-width:0;flex:1;background:#0b131c;border:1px solid var(--line);border-radius:9px;padding:10px;color:var(--text)"><button class="btn secondary" id="saveApiKey" type="button">Speichern</button></div><div class="hint" id="apiKeyStatus">Der Key wird nur lokal in diesem Browser gespeichert und nicht in GitHub veröffentlicht.</div></div></div></section>
 <section class="section card"><div class="sectionhead"><h3>Deine Wertpapiere</h3><span class="tag" id="holdingsCount">0 Positionen</span></div><div class="tablewrap"><table><thead><tr><th>WERTPAPIER</th><th class="right">STÜCK</th><th class="right">KAUFKURS</th><th class="right">AKTUELLER KURS</th><th class="right">MARKTWERT</th><th class="right">GEWINN / VERLUST</th></tr></thead><tbody id="rows"><tr><td colspan="6" class="empty">Lade dein Handelsbuch hoch, um deine Aktien hier zu sehen.</td></tr></tbody></table></div></section>
 <div class="footer">Planspielbörse · Nur zu Informations- und Lernzwecken. Keine Anlageberatung. Kurse können verzögert sein und von deinem Planspiel-Anbieter abweichen.</div>
 </main>
@@ -89,7 +90,8 @@ document.getElementById('file').addEventListener('change',async e=>{const file=e
   try{
     const symbols=[...new Set(holdings.map(h=>h.ticker||h.isin||h.wkn).filter(Boolean))];
     const url=new URL(endpoint,window.location.href);url.searchParams.set('symbols',symbols.join(','));
-    const response=await fetch(url.toString(),{cache:'no-store'});
+    const apiKey=localStorage.getItem('planspiel_api_key')||'';
+    const response=await fetch(url.toString(),{cache:'no-store',headers:apiKey?{'Authorization':'Bearer '+apiKey}:{}});
     if(!response.ok)throw new Error('HTTP '+response.status);
     const quotes=await response.json();
     let changed=0;
@@ -109,6 +111,14 @@ function startQuoteRefresh(){
   quoteTimer=setInterval(refreshQuotes,60000);
 }
 document.getElementById('refresh').addEventListener('click',refreshQuotes);
+const apiKeyInput=document.getElementById('apiKey');
+const savedApiKey=localStorage.getItem('planspiel_api_key')||'';
+if(savedApiKey){apiKeyInput.value=savedApiKey;document.getElementById('apiKeyStatus').textContent='API-Key ist lokal in diesem Browser gespeichert.'}
+document.getElementById('saveApiKey').addEventListener('click',()=>{
+  const value=apiKeyInput.value.trim();
+  if(value){localStorage.setItem('planspiel_api_key',value);document.getElementById('apiKeyStatus').textContent='API-Key lokal gespeichert. Er wird beim Kursabruf als Bearer-Token mitgesendet.'}
+  else{localStorage.removeItem('planspiel_api_key');document.getElementById('apiKeyStatus').textContent='Gespeicherter API-Key wurde aus diesem Browser entfernt.'}
+});
 render();
 setInterval(()=>{secondsToRefresh=secondsToRefresh<=1?60:secondsToRefresh-1;const el=document.getElementById('quoteStatus');if(holdings.length&&el.textContent.includes('Nächster Abruf'))el.textContent=el.textContent.replace(/Nächster Abruf in .*\./,'Nächster Abruf in '+secondsToRefresh+' Sekunden.');},1000);
 
